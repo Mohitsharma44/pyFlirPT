@@ -8,10 +8,26 @@ import os
 import sys
 import signal
 import subprocess
-from collections import OrderedDict
 import time
+import csv
+from multiprocessing.pool import ThreadPool
+from collections import OrderedDict, deque
 from blessings import Terminal
 
+
+# Pan and Tilt IP
+PTip = '192.168.1.50'
+# Pan and Tilt Port
+PTport = '4000'
+# SSH Machine
+HOST = '128.122.72.97'
+
+# Pan Limit
+PMAX = 4000
+PMIN = -4000
+# Tilt Limit
+TMAX = 2100
+TMIN = -2200
 
 # Boolean for Auth
 _is_authentic = False
@@ -38,11 +54,20 @@ class JoystickControl(object):
     to control the pan and tilt using
     compatible joysticks
     """
+    # GLOBALS:
+    
+    # Bool to enable storing positions when a special button
+    # is pressed. Check _click() method.
+    
     def __init__(self):
         self._is_authentic = _is_authentic
         self.term = Terminal()
-        self._ok = self.term.green_bold('[PyFlirPT]:')
+        self._ok = self.term.green_bold('[PyFlirPT]: ')
+        self._err = self.term.red_bold('[PyFlirPT]: ')
         pygame.init()
+        self.Preset_Flag = False
+        self.counter = 0
+        self.inst = deque(maxlen=5)
         
     def auth(self):
         p = subprocess.Popen(['gksudo', 'echo "Authenticated"'],
@@ -59,11 +84,13 @@ class JoystickControl(object):
     def exit_gracefully(self, signum, frame):
         signal.signal(signal.SIGINT, signal.getsignal(signal.SIGINT))
         try:
-            if raw_input('Exit? (y / n) > ').lower().startswith('y'):
-                sys.exit(1)
+            print 'Ta-Ta'
+            #if raw_input(self._err,'Exit? (y / n) > ').lower().startswith('y'):
+            sys.exit(1)
         except KeyboardInterrupt:
             print 'OK, OK Quitting...'
             sys.exit()
+        
             
     def list_joysticks(self):
         joysticks = pygame.joystick.get_count()
@@ -92,15 +119,152 @@ class JoystickControl(object):
 
         return joystick
 
-    def _move(self, axis, posn):
-        print 'axis', axis
+    def _fileIO(self, fname, dic=None):
+        try:
+            with open(os.path.join(os.getcwd(), fname), 'r+') as f:
+                reader = csv.reader(f)
+                writer = csv.writer(f)
+                if dic:
+                    self.fdic = {rows[0]:rows[1] for rows in reader}
+                    print 'dic: ',dic
+                    print 'fdic: ', self.fdic
+                    if self.fdic == dic:
+                        print 'Nothing has changed!'
+                    else:
+                        self.fdic.update(dic)
+                        for k,v in self.fdic.items():
+                            writer.writerow([k, v])
+                    return self.fdic
+                else:
+                    print 'No Dic passed'
+                    self.fdic = {rows[0]: rows[1] for rows in reader}
+                    return self.fdic
+                    
+        except IOError:
+            print self._err, 'Error Opening File'
+        finally:
+            print 'Done'
+            reader = None
+            writer = None
+
+    def _commandToPT(self, commands):
+        self.counter += 1
+        self._params = None
+        self.time = time.time()
+        #print self.counter
+        for i in commands:
+            #print time.time() - self.time
+            if 1 == 1:#self.counter%10 == 0:
+                #self._params = ''.join(i)
+                #print 'Command being sent: ',self._params
+                if i not in self.inst:
+                    self.inst.appendleft(i)
+                    print 'Command being sent: ',self.inst[0]
+                    p = subprocess.Popen(['ssh',
+                                          HOST,
+                                          'echo -ne "{command} \n" | nc {PTip} {PTport}'.format(
+                                              command=self.inst[0],
+                                              PTip=PTip,
+                                              PTport=PTport
+                                          )], stdout=subprocess.PIPE)
+                    out, err = p.communicate()
+                    
+            #print 'ssh',HOST,'echo -ne "{command}" | nc {PTip} {PTport}'.format(command=self._params, PTip=PTip, PTport=PTport)        
+    def _move(self, axis, hat, btn0, posn):
+        """
+        Mapping of motions of axis 0 and 1 to absolute positions
+        Mapping of motion of axis 3 to speed
+        """
+        #print 'axis', axis
+        #print 'hat', hat
+        #print 'posn', posn
+        self.command = []
+        #print 'Button2: ',btn2
+        if btn0:
+            try:
+                if not hat == (0,0):
+                    # Lock Tiliting
+                    if hat[0] in [1, -1] and axis == 0:
+                        self.command.append('PP%d'%int(posn*PMAX))
+                    # Lock Pan
+                    elif hat[1] in [1, -1] and axis == 1:
+                        self.command.append('TP%d'%int(posn*TMAX))
+                else:
+                    # Pan and Tilt together
+                    if axis == 0:
+                        self.command.append('PP%d'%int(posn*PMAX))
+                    elif axis == 1:
+                        self.command.append('TP%d'%int(posn*TMAX))
+            except Exception, e:
+                print 'Exception in _move: ',e
+            finally:
+                self._commandToPT(self.command)
+                self.command = []
+                btn0 == 0
+                #print 'Command: ',self.command
+    def _click(self, btn, posn):
+        """
+        Mapping of button clicks to functions to be
+        performed.
+        """
+        print 'button',btn
         print 'posn', posn
-        
+
+        # Bool to enable storing positions.
+        self.timeout = 3 #seconds        
+        try:
+            
+            if btn == 1:
+                self.Preset_Flag = True
+                self.dt = time.time()
+                print 'Flag Set'
+                
+            # Buttons that will set the locations as their values.
+            if btn in [6, 7, 8, 9, 10, 11]:
+                if self.Preset_Flag and self.dt > (time.time()-self.timeout):
+                    p = subprocess.Popen(['ssh', '128.122.72.97',
+                                          'echo -ne "PP \n TP \n" | nc 192.168.1.50 4000'],
+                                         stdout=subprocess.PIPE)
+                    out, err = p.communicate()
+                    self.pan = int(out.split('\r')[5].split(' ')[-1])
+                    self.tilt = int(out.split('\r')[6].split(' ')[-1])
+                    
+                    print 'SETTING PAN PRESET: ', self.pan
+                    print 'SETTING TILT PRESET:', self.tilt
+                    
+                    self.dic = {str(btn):'%s,%s'%(self.pan, self.tilt)}
+                    self.Preset_Flag = False
+                else:
+                    self.dic = None
+                    
+                pool = ThreadPool(processes=1)
+                async_result = pool.apply_async(self._fileIO, ('test.conf',self.dic))
+                return_val = async_result.get()
+
+                try:
+                    self.pan, self.tilt = return_val[str(btn)].split(',')
+                    print 'Pan: %s Tilt: %s'%(self.pan, self.tilt)
+                    # Position the Pan and Tilt to the position in the preset
+                    p = subprocess.Popen(['ssh', '128.122.72.97',
+                                          'echo -ne "PP%d \n TP%d \n" | nc 192.168.1.50 4000'%(
+                                              int(self.pan), int(self.tilt))],
+                                         stdout=subprocess.PIPE)
+                    out, err = p.communicate()
+                except KeyError:
+                    print 'No PRESET defined for this key'
+                    
+        except NameError, KeyError:
+            # NameError: If preset has never been set
+            # KeyError: If preset has never been set and querried
+            print self._err,'NO PRESET defined'
+            
+
+            
         #p = subprocess.Popen(['ssh', '128.122.72.97',
         #                      'echo -ne "PP%d \n TP%d \n" |  nc 192.168.1.50 4000'%(
         #                          int(joystick.get_axis(0)*4000),
         #                          int(joystick.get_axis(1)*4000))],
-        #                     stdout=subprocess.PIPE)
+        #                      stdout=subprocess.PIPE)
 
         #out, err = p.communicate()
         #print out.split('\r')[5:]
@@ -112,15 +276,22 @@ class JoystickControl(object):
 
         joystick = self._initialize(ids)
         #self.d = self._initialize(ids)
+        counter = 0
+        clock = pygame.time.Clock()
         while 1:
-            pygame.event.get()
-            for i in range(joystick.get_numaxes()):
-                if joystick.get_axis(i):
-                    self._move(i, joystick.get_axis(i)*4000)
+            for event in pygame.event.get():
+                if event.type == pygame.JOYBUTTONUP or event.type == pygame.JOYBUTTONDOWN:
+                    for i in range(joystick.get_numbuttons()):
+                        if joystick.get_button(i):
+                            self._click(i, joystick.get_button(i))
 
-                if joystick.get_button(i):
-                    self._move(i, joystick.get_button(i))    
-                
+                elif event.type == pygame.JOYAXISMOTION:
+                    for i in range(joystick.get_numaxes()):
+                        if joystick.get_axis(i) and i != 2:
+                            counter +=1
+                            #print counter
+                            self._move(i, joystick.get_hat(0), joystick.get_button(0), joystick.get_axis(i))
+            clock.tick(10)
             #p = subprocess.Popen(['ssh', '128.122.72.97',
             #                      'echo -ne "PP%d \n TP%d \n" |  nc 192.168.1.50 4000'%(
             #                          int(joystick.get_axis(0)*4000),
@@ -129,8 +300,5 @@ class JoystickControl(object):
             
             #out, err = p.communicate()
             #print out.split('\r')[5:]
-            time.sleep(.2)
+            #time.sleep(2)
         
-if __name__ == '__main__':
-    jc = JoystickControl()
-    jc.list_joysticks()
