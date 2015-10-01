@@ -29,6 +29,10 @@ PMIN = -4000
 TMAX = 2100
 TMIN = -2200
 
+#Pan and Tilt Speed Limit
+PSMAX = 2000
+TSMAX = 2000
+
 # Boolean for Auth
 _is_authentic = False
 # Message if not Authenticated
@@ -67,7 +71,10 @@ class JoystickControl(object):
         pygame.init()
         self.Preset_Flag = False
         self.counter = 0
+        # Queue of commands to be sent
         self.inst = deque(maxlen=5)
+        self.current_pan = 0
+        self.current_tilt = 0
         
     def auth(self):
         p = subprocess.Popen(['gksudo', 'echo "Authenticated"'],
@@ -106,8 +113,12 @@ class JoystickControl(object):
         Get information on all the joystick control and
         create a dictionary which will be used for control.
         """
+        self.command = ['CI', 'PS100 \n TS100 \n', 'LU']
+        self._commandToPT(self.command)
+        
         joystick = pygame.joystick.Joystick(ids)
         joystick.init()
+        '''
         self.axes = ['axis_%d'%a for a in range(joystick.get_numaxes())]
         self.buttons = ['button_%d'%b for b in range(joystick.get_numbuttons())]
         self.hats = ['hat_%d'%h for h in range(joystick.get_numhats())]
@@ -116,7 +127,7 @@ class JoystickControl(object):
         self.d = OrderedDict.fromkeys(self.buttons)
         self.d.update(OrderedDict.fromkeys(self.hats))
         self.d.update(OrderedDict.fromkeys(self.buttons))
-
+        '''
         return joystick
 
     def _fileIO(self, fname, dic=None):
@@ -136,51 +147,55 @@ class JoystickControl(object):
                             writer.writerow([k, v])
                     return self.fdic
                 else:
-                    print 'No Dic passed'
+                    #print 'No Dic passed'
                     self.fdic = {rows[0]: rows[1] for rows in reader}
                     return self.fdic
                     
         except IOError:
             print self._err, 'Error Opening File'
         finally:
-            print 'Done'
             reader = None
             writer = None
 
-    def _commandToPT(self, commands):
-        self.counter += 1
+    def _commandToPT(self, commands, btn=None):
         self._params = None
         self.time = time.time()
         #print self.counter
         for i in commands:
-            #print time.time() - self.time
-            if 1 == 1:#self.counter%10 == 0:
-                #self._params = ''.join(i)
-                #print 'Command being sent: ',self._params
-                if i not in self.inst:
-                    self.inst.appendleft(i)
-                    print 'Command being sent: ',self.inst[0]
-                    p = subprocess.Popen(['ssh',
-                                          HOST,
-                                          'echo -ne "{command} \n" | nc {PTip} {PTport}'.format(
-                                              command=self.inst[0],
-                                              PTip=PTip,
-                                              PTport=PTport
-                                          )], stdout=subprocess.PIPE)
-                    out, err = p.communicate()
-                    
-            #print 'ssh',HOST,'echo -ne "{command}" | nc {PTip} {PTport}'.format(command=self._params, PTip=PTip, PTport=PTport)        
-    def _move(self, axis, hat, btn0, posn):
+            if i not in self.inst:
+                self.inst.appendleft(i)
+                #print 'Command being sent: ',self.inst[0]
+                p = subprocess.Popen(['ssh',
+                                      HOST,
+                                      'echo -ne "{command} \n" | nc {PTip} {PTport}'.format(
+                                          command=self.inst[0],
+                                          PTip=PTip,
+                                          PTport=PTport
+                                      )], stdout=subprocess.PIPE)
+                out, err = p.communicate()
+                return out
+
+    def _moveabs(self, axis, hat, btn0, btn1, posn):
         """
         Mapping of motions of axis 0 and 1 to absolute positions
         Mapping of motion of axis 3 to speed
         """
+        def _speedrange(posn):
+            old_max = -1
+            old_min = 1
+            new_max = 1
+            new_min = 0
+            old_range = old_max - old_min
+            new_range = new_max - new_min
+            
+            return (((posn - old_min)* new_range)/ old_range)+ new_min
+        
         #print 'axis', axis
         #print 'hat', hat
         #print 'posn', posn
         self.command = []
-        #print 'Button2: ',btn2
-        if btn0:
+        
+        if axis in [0, 1] and btn1:
             try:
                 if not hat == (0,0):
                     # Lock Tiliting
@@ -196,36 +211,57 @@ class JoystickControl(object):
                     elif axis == 1:
                         self.command.append('TP%d'%int(posn*TMAX))
             except Exception, e:
-                print 'Exception in _move: ',e
+                print 'Exception in panning and tilting: ',e
             finally:
                 self._commandToPT(self.command)
                 self.command = []
-                btn0 == 0
+                btn1 == 0
                 #print 'Command: ',self.command
+        elif axis == 3:
+            try:
+                speed = int(_speedrange(posn)*PSMAX)
+                # Set Pan Speed
+                self.command.append('TS%d \n PS%d \n'%(speed, speed))
+            except Exception, e:
+                print 'Exception in setting axis speed', e
+            finally:
+                self._commandToPT(self.command)
+                self.command = []
+                    
     def _click(self, btn, posn):
         """
         Mapping of button clicks to functions to be
         performed.
         """
-        print 'button',btn
-        print 'posn', posn
+        self.command = []
+        print 'Preset: ',btn
+        #print 'posn', posn
 
         # Bool to enable storing positions.
         self.timeout = 3 #seconds        
         try:
-            
+            if btn == 0:
+                print 'HALT'
+                p = subprocess.Popen(['ssh', '128.122.72.97',
+                                      'echo -ne "H \n" | nc 192.168.1.50 4000'],
+                                     stdout=subprocess.PIPE)
+                out, err = p.communicate()
+                print out
+
             if btn == 1:
                 self.Preset_Flag = True
                 self.dt = time.time()
-                print 'Flag Set'
+                print 'Control Set'
                 
             # Buttons that will set the locations as their values.
             if btn in [6, 7, 8, 9, 10, 11]:
                 if self.Preset_Flag and self.dt > (time.time()-self.timeout):
-                    p = subprocess.Popen(['ssh', '128.122.72.97',
-                                          'echo -ne "PP \n TP \n" | nc 192.168.1.50 4000'],
-                                         stdout=subprocess.PIPE)
-                    out, err = p.communicate()
+                    self.command.append('PP \n TP \n')
+                    out = self._commandToPT(self.command)
+                    #p = subprocess.Popen(['ssh', '128.122.72.97',
+                    #                      'echo -ne "PP \n TP \n" | nc 192.168.1.50 4000'],
+                    #                     stdout=subprocess.PIPE)
+                    #out, err = p.communicate()
                     self.pan = int(out.split('\r')[5].split(' ')[-1])
                     self.tilt = int(out.split('\r')[6].split(' ')[-1])
                     
@@ -245,6 +281,8 @@ class JoystickControl(object):
                     self.pan, self.tilt = return_val[str(btn)].split(',')
                     print 'Pan: %s Tilt: %s'%(self.pan, self.tilt)
                     # Position the Pan and Tilt to the position in the preset
+                    # Let it be a separate code for now.
+                    # Later it will send list to _commandToPT method
                     p = subprocess.Popen(['ssh', '128.122.72.97',
                                           'echo -ne "PP%d \n TP%d \n" | nc 192.168.1.50 4000'%(
                                               int(self.pan), int(self.tilt))],
@@ -252,6 +290,8 @@ class JoystickControl(object):
                     out, err = p.communicate()
                 except KeyError:
                     print 'No PRESET defined for this key'
+                finally:
+                    self.command = []
                     
         except NameError, KeyError:
             # NameError: If preset has never been set
@@ -284,13 +324,17 @@ class JoystickControl(object):
                     for i in range(joystick.get_numbuttons()):
                         if joystick.get_button(i):
                             self._click(i, joystick.get_button(i))
-
+                        
                 elif event.type == pygame.JOYAXISMOTION:
                     for i in range(joystick.get_numaxes()):
                         if joystick.get_axis(i) and i != 2:
                             counter +=1
                             #print counter
-                            self._move(i, joystick.get_hat(0), joystick.get_button(0), joystick.get_axis(i))
+                            self._moveabs(i,
+                                       joystick.get_hat(0),
+                                       joystick.get_button(0),
+                                       joystick.get_button(1),
+                                       joystick.get_axis(i))
             clock.tick(10)
             #p = subprocess.Popen(['ssh', '128.122.72.97',
             #                      'echo -ne "PP%d \n TP%d \n" |  nc 192.168.1.50 4000'%(
