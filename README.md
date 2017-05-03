@@ -1,6 +1,9 @@
 # pyflir
 Python wrapper for controlling the FLIR E Series Pan and Tilt devices.
 
+> Note:
+> - Remember to add the path where you clone this repo to your `PATH` global variable. I don't use relative imports.
+
 ## Usage:
 #### Using joystick
 **Ipython:**
