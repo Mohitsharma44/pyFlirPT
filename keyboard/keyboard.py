@@ -36,8 +36,6 @@ class KeyboardController(object):
         self.sentinel = "\r\n"
         self.tn = self._openTelnet(self.PT_IP, self.PT_PORT)
         atexit.register(self.cleanup)
-        #self.tn.write("PP100"+self.sentinel)
-        #self.logger.info(self.tn.read_until(self.cursor+self.sentinel))
         self.resetPT()
 
     def _openTelnet(self, host, port):
@@ -86,22 +84,35 @@ class KeyboardController(object):
         Keep the socket alive                                                  
 
         Parameters                                                             
-        ----------                                                                     sock: TCP socket                                                               idle_after_sec: int                                                                activate after `idle_after` seconds of idleness                                default: 1                                                                 interval_sec: int                                                                  interval between which keepalive ping is to be sent                            default: 3                                                                 max_fails: int                                                                     maximum keep alive attempts before closing the socket                          default: 5                                                                                                                                                """
+        ----------                                                                     
+        sock: TCP socket                                                               
+        idle_after_sec: int                                                                
+            activate after `idle_after` seconds of idleness                                
+            default: 1                                                                 
+        interval_sec: int                                                                  
+            interval between which keepalive ping is to be sent                            
+            default: 3                                                                 
+        max_fails: int                                                                     
+            maximum keep alive attempts before closing the socket                          
+            default: 5                                                                                                                                                """
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        self.logger.info("Done1")
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, idle_after_sec)
-        self.logger.info("Done2")
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, interval_sec)
-        self.logger.info("Done3")
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, max_fails)
-        self.logger.info("Done4")
         
     def _checkTelnetConnection(self, tnsock=None):
-        """                                                                            Check the telnet connection is alive or not                            
+        """                                                                            
+        Check the telnet connection is alive or not                            
 
-        Parameters                                                                     ----------                                                                     tnsock: Telnet socket                                                  
+        Parameters                                                                     
+        ----------                                                                     
+        tnsock: Telnet socket                                                  
 
-        Returns                                                                        -------                                                                        True: bool                                                                          if the connection is alive                                                """
+        Returns           
+        -------                                                                        
+        True: bool                                                                          
+        if the connection is alive                                                
+        """
         try:
             tnsock.sendall(IAC + NOP)
             self.logger.info("Detected Telnet connection is alive")
@@ -116,7 +127,14 @@ class KeyboardController(object):
         Close the Telnet connection and
         Reopen them                                                            
 
-        Parameters                                                                     ----------                                                                     tn: Telnet object                                                                  Optional. If not passed, it will close and reopen                              the existing telnet connection                                             ..Note: This will make all the old telnet objects point                             to the new object                                                         """
+        Parameters                                                                     
+        ----------                                                                     
+        tn: Telnet object                                                                  
+            Optional. If not passed, it will close and reopen                              
+            the existing telnet connection                                             
+            ..Note: This will make all the old telnet objects point                             
+            to the new object                                                         
+        """
         self.logger.warning("Restarting Telnet connection")
         self._closeTelnet(tn)
         self.tn = None
@@ -219,10 +237,3 @@ class KeyboardController(object):
         self.logger.info("Quitting Control ")
         self._closeTelnet(self.tn)
         traceback.print_exc()
-        #sys.exit(1)
-
-"""
-if __name__ == "__main__":
-    kc = KeyboardController()
-    kc.move()
-"""
