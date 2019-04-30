@@ -10,7 +10,7 @@ import logging.handlers
 import os
 import inspect
 
-def ptlogger(loggername=None, every="midnight", tofile=True):
+def ptlogger(loggername=None, every="midnight", tofile=False):
     """
     This function will return a logger that will write the
     debug level logs to a file and print info level 
@@ -27,12 +27,13 @@ def ptlogger(loggername=None, every="midnight", tofile=True):
     logger
         logger object with filehandler for debug level logs  and streamhandler for info level
     """
-    BASE_DIR = os.getenv('pantilt_logs')
+    #BASE_DIR = os.getenv('pantilt_logs')
+    BASE_DIR = "/var/log/cuic/"
     loggername=str(inspect.getouterframes(inspect.currentframe())[1][1]).split('/')[-1][:-3]
     LOG_FNAME = os.path.join(BASE_DIR, loggername)
     logger = logging.getLogger(loggername)
 
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     formatter = logging.Formatter(
         "[%(asctime)s] - [%(levelname)8s] --- %(message)s (%(filename)s:%(lineno)s)\n \033[F", datefmt="%d-%m-%Y %H:%M:%S")
 

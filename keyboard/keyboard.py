@@ -199,7 +199,7 @@ class KeyboardController(object):
         """
         Method to reset the pan and tilt's speed
         """
-        commands = [b'ED', b'CI', b'PS300', b'TS300', b'LU']
+        commands = [b'ED', b'CI', b'PS150', b'TS150', b'LU']
         map(lambda x: self.execute(x), commands)
 
     def pan(self, posn):
